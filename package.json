@@ -17,7 +17,8 @@
   "dependencies": {
     "@tailwindcss/vite": "4.2.4",
     "solid-js": "^1.9.11",
-    "tailwindcss": "4.2.4"
+    "tailwindcss": "4.2.4",
+    "tinykeys": "3.0.0"
   },
   "devDependencies": {
     "@wxt-dev/module-solid": "^1.1.4",
