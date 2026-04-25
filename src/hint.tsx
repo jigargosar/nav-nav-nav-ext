@@ -79,10 +79,10 @@ function assignLabels(count: number): string[] {
 
 // === overlap clustering ===
 
-// approximate label badge size: ~9px per char + padding
+// approximate label badge size: ~11px per char + padding
 function estimateLabelRect(targetRect: DOMRect, label: string): DOMRect {
-    const w = label.length * 9 + 8
-    const h = 16
+    const w = label.length * 11 + 12
+    const h = 22
     return new DOMRect(targetRect.left, targetRect.top, w, h)
 }
 
@@ -187,10 +187,10 @@ const Overlay: Component<OverlayProps> = (props) => {
                             background: remaining() ? '#fde68a' : '#9ca3af',
                             color: '#111827',
                             border: '1px solid #92400e',
-                            'border-radius': '3px',
-                            padding: '0 3px',
-                            font: 'bold 12px monospace',
-                            'line-height': '14px',
+                            'border-radius': '4px',
+                            padding: '2px 5px',
+                            font: 'bold 15px monospace',
+                            'line-height': '18px',
                             'pointer-events': 'none',
                             opacity: remaining() ? '1' : '0.4',
                         }}
