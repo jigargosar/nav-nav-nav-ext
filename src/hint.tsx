@@ -59,7 +59,8 @@ function findTargets(): {el: Element; rect: DOMRect}[] {
 // === label assignment ===
 
 // home row first (easiest), then top row, then bottom row
-const ALPHABET = 'fjdkslaghrueiwoptyvbcnmxzq'
+// 'f' is reserved as the hint trigger and never appears as a label letter
+const ALPHABET = 'jdkslaghrueiwoptyvbcnmxzq'
 
 function assignLabels(count: number): string[] {
     if (count <= ALPHABET.length) {
@@ -136,11 +137,20 @@ function clusterByOverlap(targets: {labelRect: DOMRect}[]): ClusterInfo[] {
 // === click action ===
 
 function activate(el: Element, variant: HintVariant) {
-    if (variant === 'new-tab' && el instanceof HTMLAnchorElement && el.href) {
-        window.open(el.href, '_blank')
+    if (!(el instanceof HTMLElement)) return
+    if (variant === 'same-tab') {
+        el.click()
         return
     }
-    if (el instanceof HTMLElement) el.click()
+    // new-tab: synthesize a Ctrl+Click so the browser opens in a background tab
+    el.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0,
+        ctrlKey: true,
+        metaKey: true, // for macOS
+    }))
 }
 
 // === overlay component ===
@@ -149,21 +159,22 @@ interface OverlayProps {
     targets: () => Target[]
     typed: () => string
     cycle: () => number
+    variant: () => HintVariant
 }
 
 const Overlay: Component<OverlayProps> = (props) => {
     return (
         <For each={props.targets()}>
-            {(t, i) => {
+            {(t) => {
+                const upper = () => props.variant() === 'new-tab'
+                const display = (s: string) => (upper() ? s.toUpperCase() : s)
                 const remaining = () => {
                     const typed = props.typed()
                     return t.label.startsWith(typed) ? t.label.slice(typed.length) : null
                 }
-                // non-clustered hints sit at z=1000; clustered hints rotate within their cluster
                 const z = () => {
                     if (t.cluster < 0) return 1000
                     const order = (t.indexInCluster + props.cycle()) % t.clusterSize
-                    // higher order = on top
                     return 2000 + order
                 }
                 return (
@@ -184,7 +195,7 @@ const Overlay: Component<OverlayProps> = (props) => {
                             opacity: remaining() ? '1' : '0.4',
                         }}
                     >
-                        {remaining() ?? t.label}
+                        {display(remaining() ?? t.label)}
                     </span>
                 )
             }}
@@ -198,7 +209,7 @@ export interface HintDeps {
     onExit: () => void
 }
 
-export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
+export function enterHint(initialVariant: HintVariant, deps: HintDeps): () => void {
     const found = findTargets()
     if (found.length === 0) {
         queueMicrotask(deps.onExit)
@@ -225,8 +236,12 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
     const [typed, setTyped] = createSignal('')
     const [list] = createSignal(targets)
     const [cycle, setCycle] = createSignal(0)
+    const [variant, setVariant] = createSignal<HintVariant>(initialVariant)
 
-    const dispose = render(() => <Overlay targets={list} typed={typed} cycle={cycle} />, root)
+    const dispose = render(
+        () => <Overlay targets={list} typed={typed} cycle={cycle} variant={variant} />,
+        root,
+    )
 
     let exited = false
     const cleanup = () => {
@@ -246,8 +261,15 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
         e.preventDefault()
         e.stopPropagation()
 
-        if (e.key === 'Escape' || (e.key === 'f' && !e.shiftKey) || (e.key === 'F' && e.shiftKey)) {
+        if (e.key === 'Escape') {
             exitToNormal()
+            return
+        }
+
+        // f / F switch variants while staying in hint mode
+        if (e.key === 'f' || e.key === 'F') {
+            const next: HintVariant = e.shiftKey ? 'new-tab' : 'same-tab'
+            setVariant(next)
             return
         }
 
@@ -271,8 +293,16 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
         }
         if (matches.length === 1 && matches[0].label === next) {
             const hit = matches[0]
+            const v = variant()
+            if (v === 'new-tab') {
+                // open in background, stay in mode, clear buffer
+                activate(hit.el, 'new-tab')
+                setTyped('')
+                return
+            }
+            // same-tab: open and exit
             cleanup()
-            activate(hit.el, variant)
+            activate(hit.el, 'same-tab')
             deps.onExit()
             return
         }
