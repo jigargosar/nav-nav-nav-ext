@@ -1,6 +1,6 @@
 import "~/assets/tailwind.css";
 import {bindKeys} from '~/src/keys'
-import {scrollToBottom, scrollToTop} from '~/src/scroll'
+import {defaultBindings} from '~/src/bindings'
 
 const ENABLED_KEY = 'enabled'
 
@@ -11,12 +11,7 @@ export default defineContentScript({
 
         const apply = (enabled: boolean) => {
             unbind?.()
-            unbind = enabled
-                ? bindKeys({
-                    'g g': scrollToTop,
-                    'Shift+G': scrollToBottom,
-                })
-                : null
+            unbind = enabled ? bindKeys(defaultBindings) : null
             console.log('[nav-nav-nav]', enabled ? 'enabled' : 'disabled')
         }
 
