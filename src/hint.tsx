@@ -9,6 +9,10 @@ interface Target {
     el: Element
     label: string
     rect: DOMRect
+    labelRect: DOMRect
+    cluster: number // -1 if not in any overlap cluster
+    indexInCluster: number // 0 if not clustered
+    clusterSize: number // 1 if not clustered
 }
 
 // === clickable discovery ===
@@ -72,6 +76,63 @@ function assignLabels(count: number): string[] {
     return labels
 }
 
+// === overlap clustering ===
+
+// approximate label badge size: ~9px per char + padding
+function estimateLabelRect(targetRect: DOMRect, label: string): DOMRect {
+    const w = label.length * 9 + 8
+    const h = 16
+    return new DOMRect(targetRect.left, targetRect.top, w, h)
+}
+
+function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
+    return !(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top)
+}
+
+interface ClusterInfo {
+    cluster: number
+    indexInCluster: number
+    clusterSize: number
+}
+
+// union-find clustering on label rects
+function clusterByOverlap(targets: {labelRect: DOMRect}[]): ClusterInfo[] {
+    const n = targets.length
+    const parent = Array.from({length: n}, (_, i) => i)
+    const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])))
+    const union = (a: number, b: number) => {
+        const ra = find(a), rb = find(b)
+        if (ra !== rb) parent[ra] = rb
+    }
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            if (rectsOverlap(targets[i].labelRect, targets[j].labelRect)) union(i, j)
+        }
+    }
+    const sizeByRoot = new Map<number, number>()
+    const indexByRoot = new Map<number, number>()
+    for (let i = 0; i < n; i++) {
+        const r = find(i)
+        sizeByRoot.set(r, (sizeByRoot.get(r) ?? 0) + 1)
+    }
+    const rootToCluster = new Map<number, number>()
+    let nextId = 0
+    const out = new Array<ClusterInfo>(n)
+    for (let i = 0; i < n; i++) {
+        const r = find(i)
+        const size = sizeByRoot.get(r) ?? 1
+        if (size < 2) {
+            out[i] = {cluster: -1, indexInCluster: 0, clusterSize: 1}
+            continue
+        }
+        if (!rootToCluster.has(r)) rootToCluster.set(r, nextId++)
+        const idx = indexByRoot.get(r) ?? 0
+        indexByRoot.set(r, idx + 1)
+        out[i] = {cluster: rootToCluster.get(r)!, indexInCluster: idx, clusterSize: size}
+    }
+    return out
+}
+
 // === click action ===
 
 function activate(el: Element, variant: HintVariant) {
@@ -84,13 +145,26 @@ function activate(el: Element, variant: HintVariant) {
 
 // === overlay component ===
 
-const Overlay: Component<{targets: () => Target[]; typed: () => string}> = (props) => {
+interface OverlayProps {
+    targets: () => Target[]
+    typed: () => string
+    cycle: () => number
+}
+
+const Overlay: Component<OverlayProps> = (props) => {
     return (
         <For each={props.targets()}>
-            {(t) => {
+            {(t, i) => {
                 const remaining = () => {
                     const typed = props.typed()
                     return t.label.startsWith(typed) ? t.label.slice(typed.length) : null
+                }
+                // non-clustered hints sit at z=1000; clustered hints rotate within their cluster
+                const z = () => {
+                    if (t.cluster < 0) return 1000
+                    const order = (t.indexInCluster + props.cycle()) % t.clusterSize
+                    // higher order = on top
+                    return 2000 + order
                 }
                 return (
                     <span
@@ -98,7 +172,7 @@ const Overlay: Component<{targets: () => Target[]; typed: () => string}> = (prop
                             position: 'fixed',
                             left: `${t.rect.left}px`,
                             top: `${t.rect.top}px`,
-                            'z-index': '2147483647',
+                            'z-index': String(z()),
                             background: remaining() ? '#fde68a' : '#9ca3af',
                             color: '#111827',
                             border: '1px solid #92400e',
@@ -132,7 +206,14 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
     }
 
     const labels = assignLabels(found.length)
-    const targets: Target[] = found.map((f, i) => ({el: f.el, label: labels[i], rect: f.rect}))
+    const partial = found.map((f, i) => ({
+        el: f.el,
+        label: labels[i],
+        rect: f.rect,
+        labelRect: estimateLabelRect(f.rect, labels[i]),
+    }))
+    const clusters = clusterByOverlap(partial)
+    const targets: Target[] = partial.map((p, i) => ({...p, ...clusters[i]}))
 
     const host = document.createElement('div')
     host.style.cssText = 'all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;'
@@ -143,8 +224,9 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
 
     const [typed, setTyped] = createSignal('')
     const [list] = createSignal(targets)
+    const [cycle, setCycle] = createSignal(0)
 
-    const dispose = render(() => <Overlay targets={list} typed={typed} />, root)
+    const dispose = render(() => <Overlay targets={list} typed={typed} cycle={cycle} />, root)
 
     let exited = false
     const cleanup = () => {
@@ -166,6 +248,11 @@ export function enterHint(variant: HintVariant, deps: HintDeps): () => void {
 
         if (e.key === 'Escape' || (e.key === 'f' && !e.shiftKey) || (e.key === 'F' && e.shiftKey)) {
             exitToNormal()
+            return
+        }
+
+        if (e.key === ' ') {
+            setCycle((c) => c + 1)
             return
         }
 
