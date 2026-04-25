@@ -15,7 +15,9 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
-    "solid-js": "^1.9.11"
+    "@tailwindcss/vite": "4.2.4",
+    "solid-js": "^1.9.11",
+    "tailwindcss": "4.2.4"
   },
   "devDependencies": {
     "@wxt-dev/module-solid": "^1.1.4",
